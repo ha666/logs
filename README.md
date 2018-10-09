@@ -1,37 +1,66 @@
-# logs
-
-#### 项目介绍
-logs
-
-#### 软件架构
-软件架构说明
+## logs
+logs is a Go logs manager. It can use many logs adapters.
 
 
-#### 安装教程
+## How to install?
 
-1. xxxx
-2. xxxx
-3. xxxx
-
-#### 使用说明
-
-1. xxxx
-2. xxxx
-3. xxxx
-
-#### 参与贡献
-
-1. Fork 本项目
-2. 新建 Feat_xxx 分支
-3. 提交代码
-4. 新建 Pull Request
+	go get gitee.com/ha666/logs
 
 
-#### 码云特技
+## What adapters are supported?
 
-1. 使用 Readme\_XXX.md 来支持不同的语言，例如 Readme\_en.md, Readme\_zh.md
-2. 码云官方博客 [blog.gitee.com](https://blog.gitee.com)
-3. 你可以 [https://gitee.com/explore](https://gitee.com/explore) 这个地址来了解码云上的优秀开源项目
-4. [GVP](https://gitee.com/gvp) 全称是码云最有价值开源项目，是码云综合评定出的优秀开源项目
-5. 码云官方提供的使用手册 [https://gitee.com/help](https://gitee.com/help)
-6. 码云封面人物是一档用来展示码云会员风采的栏目 [https://gitee.com/gitee-stars/](https://gitee.com/gitee-stars/)
+As of now this logs support console, file .
+
+
+## How to use it?
+
+First you must import it
+
+```golang
+import (
+	"gitee.com/ha666/logs"
+)
+```
+
+Then init a Log (example with console adapter)
+
+```golang
+logs.SetLogger(logs.AdapterConsole, `{"level":7,"color":true}`)
+```
+
+> the first params stand for how many channel
+
+Use it like this:
+
+```golang
+logs.Alert("alert")
+logs.Error("error")
+logs.Warning("warning")
+logs.Warn("warn")
+logs.Info("info")
+logs.Debug("debug")
+logs.Trace("trace")
+```
+
+## File adapter
+
+Configure file adapter like this:
+
+```golang
+logs.SetLogger(logs.AdapterFile, `{"filename":"./log/log.log","level":7,"maxlines":0,"maxsize":0,"daily":true,"maxdays":100}`)
+```
+
+## Logging caller information (file name & line number)
+
+The module can be configured to include the file & line number of the log calls in the logging output. This functionality is disabled by default, but can be enabled using the following code:
+```golang
+logs.EnableFuncCallDepth(true)
+```
+Use true to turn file & line number logging on, and false to turn it off. Default is false.
+
+If your application encapsulates the call to the log methods, you may need use SetLogFuncCallDepth to set the number of stack frames to be skipped before the caller information is retrieved. The default is 2.
+```golang
+logs.SetLogFuncCallDepth(3)
+```
+
+
