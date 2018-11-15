@@ -25,7 +25,7 @@ import (
 Then init a Log (example with console adapter)
 
 ```golang
-logs.SetLogger(logs.AdapterConsole, `{"level":7,"color":true}`)
+logs.SetLogger(logs.AdapterConsole, `{"level":7}`)
 ```
 
 > the first params stand for how many channel
