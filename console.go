@@ -23,15 +23,15 @@ import (
 
 // consoleWriter implements LoggerInterface and writes messages to terminal.
 type consoleWriter struct {
-	lg       *logWriter
-	Level    int  `json:"level"`
+	lg    *logWriter
+	Level int `json:"level"`
 }
 
 // NewConsole create ConsoleWriter returning as LoggerInterface.
 func NewConsole() Logger {
 	cw := &consoleWriter{
-		lg:       newLogWriter(os.Stdout),
-		Level:    LevelDebug,
+		lg:    newLogWriter(os.Stdout),
+		Level: LevelDebug,
 	}
 	return cw
 }
