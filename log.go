@@ -361,6 +361,8 @@ func (bl *BeeLogger) Emergency(format string, v ...interface{}) {
 		return
 	}
 	bl.writeMsg(LevelEmergency, format, v...)
+	time.Sleep(50*time.Millisecond)
+	os.Exit(1)
 }
 
 // Alert Log ALERT level message.
