@@ -86,7 +86,7 @@ type Logger interface {
 }
 
 var adapters = make(map[string]newLoggerFunc)
-var levelPrefix = [LevelDebug + 1]string{"[M] ", "[A] ", "[C] ", "[E] ", "[W] ", "[N] ", "[I] ", "[D] "}
+var levelPrefix = [LevelDebug + 1]string{"[Emergency] ", "[Alert] ", "[Critical] ", "[Error] ", "[Warning] ", "[Notice] ", "[Info] ", "[Debug] "}
 
 // Register makes a log provide available by the provided name.
 // If Register is called twice with the same name or if driver is nil,
@@ -263,7 +263,17 @@ func (bl *BeeLogger) writeMsg(logLevel int, msg string, v ...interface{}) error 
 		msg = fmt.Sprintf(msg, v...)
 	}
 
-	msg = bl.prefix + " " + msg
+	msg = "- " + msg
+
+	msg = bl.prefix + msg
+
+	//set level info in front of filename info
+	if logLevel == levelLoggerImpl {
+		// set to emergency to ensure all log will be print out correctly
+		logLevel = LevelEmergency
+	} else {
+		msg = levelPrefix[logLevel] + msg
+	}
 
 	when := time.Now()
 	if bl.enableFuncCallDepth {
@@ -273,16 +283,10 @@ func (bl *BeeLogger) writeMsg(logLevel int, msg string, v ...interface{}) error 
 			line = 0
 		}
 		_, filename := path.Split(file)
-		msg = "[" + filename + ":" + strconv.Itoa(line) + "] " + msg
+		msg = filename + ":" + strconv.Itoa(line) + " " + msg
 	}
 
-	//set level info in front of filename info
-	if logLevel == levelLoggerImpl {
-		// set to emergency to ensure all log will be print out correctly
-		logLevel = LevelEmergency
-	} else {
-		msg = levelPrefix[logLevel] + msg
-	}
+	msg = idNode.Generate().String() + " " + msg
 
 	if bl.asynchronous {
 		lm := logMsgPool.Get().(*logMsg)
@@ -361,7 +365,7 @@ func (bl *BeeLogger) Emergency(format string, v ...interface{}) {
 		return
 	}
 	bl.writeMsg(LevelEmergency, format, v...)
-	time.Sleep(50*time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	os.Exit(1)
 }
 
