@@ -1,7 +1,7 @@
 package logs
 
 import (
-	"gitee.com/ha666/golibs"
+	"github.com/ha666/golibs"
 	"log"
 )
 

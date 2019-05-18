@@ -4,7 +4,7 @@ logs is a Go logs manager. It can use many logs adapters.
 
 ## How to install?
 
-	go get gitee.com/ha666/logs
+	go get github.com/ha666/logs
 
 
 ## What adapters are supported?
@@ -18,7 +18,7 @@ First you must import it
 
 ```golang
 import (
-	"gitee.com/ha666/logs"
+	"github.com/ha666/logs"
 )
 ```
 
