@@ -286,8 +286,6 @@ func (bl *BeeLogger) writeMsg(logLevel int, msg string, v ...interface{}) error 
 		msg = filename + ":" + strconv.Itoa(line) + " " + msg
 	}
 
-	msg = idNode.Generate().String() + " " + msg
-
 	if bl.asynchronous {
 		lm := logMsgPool.Get().(*logMsg)
 		lm.level = logLevel
