@@ -315,16 +315,9 @@ func (w *fileLogWriter) doRotate(logTime time.Time) error {
 	}
 
 	// only when one of them be setted, then the file would be splited
-	if w.MaxLines > 0 || w.MaxSize > 0 {
-		for ; err == nil && num <= w.MaxFiles; num++ {
-			fName = w.fileNameOnly + fmt.Sprintf(".%s.%s", logTime.Format(format), w.suffix)
-			_, err = os.Lstat(fName)
-		}
-	} else {
-		fName = w.fileNameOnly + fmt.Sprintf(".%s.%s", openTime.Format(format), w.suffix)
-		_, err = os.Lstat(fName)
-		w.MaxFilesCurFiles = num
-	}
+	fName = w.fileNameOnly + fmt.Sprintf(".%s%s", openTime.Format(format), w.suffix)
+	_, err = os.Lstat(fName)
+	w.MaxFilesCurFiles = num
 
 	// return error if the last file checked still existed
 	if err == nil {
