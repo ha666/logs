@@ -1,3 +1,3 @@
 package logs
 
-const VERSION = "2019.826.1015"
+const VERSION = "2019.830.1004"

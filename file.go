@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ha666/golibs"
 	"io"
 	"os"
 	"path"
@@ -315,7 +316,7 @@ func (w *fileLogWriter) doRotate(logTime time.Time) error {
 	}
 
 	// only when one of them be setted, then the file would be splited
-	fName = w.fileNameOnly + fmt.Sprintf(".%s%s", openTime.Format(format), w.suffix)
+	fName = w.getNewPath() + fmt.Sprintf("%s%s", openTime.Format(format), w.suffix)
 	_, err = os.Lstat(fName)
 	w.MaxFilesCurFiles = num
 
@@ -348,6 +349,12 @@ RESTART_LOGGER:
 		return fmt.Errorf("Rotate: %s", err)
 	}
 	return nil
+}
+
+func (w *fileLogWriter) getNewPath() string {
+	position := strings.LastIndex(w.fileNameOnly, "/")
+	s1 := golibs.SubString(w.fileNameOnly, 0, position+1)
+	return s1
 }
 
 func (w *fileLogWriter) deleteOldLog() {
