@@ -15,7 +15,7 @@
 // Package logs provide a general log interface
 // Usage:
 //
-// import "github.com/astaxie/beego/logs"
+// import "github.com/beego/beego/v2/logs"
 //
 //	log := NewLogger(10000)
 //	log.SetLogger("console", "")
@@ -34,16 +34,17 @@
 package logs
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
-	"path"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+var ignoreDir string
 
 // RFC5424 log message levels.
 const (
@@ -66,6 +67,12 @@ const (
 	AdapterConsole   = "console"
 	AdapterFile      = "file"
 	AdapterMultiFile = "multifile"
+	AdapterMail      = "smtp"
+	AdapterConn      = "conn"
+	AdapterEs        = "es"
+	AdapterJianLiao  = "jianliao"
+	AdapterSlack     = "slack"
+	AdapterAliLS     = "alils"
 )
 
 // Legacy log level constants to ensure backwards compatibility.
@@ -80,13 +87,14 @@ type newLoggerFunc func() Logger
 // Logger defines the behavior of a log provider.
 type Logger interface {
 	Init(config string) error
-	WriteMsg(when time.Time, msg string, level int) error
+	WriteMsg(lm *LogMsg) error
 	Destroy()
 	Flush()
+	SetFormatter(f LogFormatter)
 }
 
 var adapters = make(map[string]newLoggerFunc)
-var levelPrefix = [LevelDebug + 1]string{"[Emergency] ", "[Alert] ", "[Critical] ", "[Error] ", "[Warning] ", "[Notice] ", "[Info] ", "[Debug] "}
+var levelPrefix = [LevelDebug + 1]string{"[M]", "[A]", "[C]", "[E]", "[W]", "[N]", "[I]", "[D]"}
 
 // Register makes a log provide available by the provided name.
 // If Register is called twice with the same name or if driver is nil,
@@ -102,20 +110,22 @@ func Register(name string, log newLoggerFunc) {
 }
 
 // BeeLogger is default logger in beego application.
-// it can contain several providers and log message into all providers.
+// Can contain several providers and log message into all providers.
 type BeeLogger struct {
 	lock                sync.Mutex
 	level               int
 	init                bool
 	enableFuncCallDepth bool
 	loggerFuncCallDepth int
+	enableFullFilePath  bool
 	asynchronous        bool
 	prefix              string
 	msgChanLen          int64
-	msgChan             chan *logMsg
+	msgChan             chan *LogMsg
 	signalChan          chan string
 	wg                  sync.WaitGroup
 	outputs             []*nameLogger
+	globalFormatter     string
 }
 
 const defaultAsyncMsgLen = 1e3
@@ -125,21 +135,15 @@ type nameLogger struct {
 	name string
 }
 
-type logMsg struct {
-	level int
-	msg   string
-	when  time.Time
-}
-
 var logMsgPool *sync.Pool
 
 // NewLogger returns a new BeeLogger.
-// channelLen means the number of messages in chan(used where asynchronous is true).
+// channelLen: the number of messages in chan(used where asynchronous is true).
 // if the buffering chan is full, logger adapters write to file or other way.
 func NewLogger(channelLens ...int64) *BeeLogger {
 	bl := new(BeeLogger)
 	bl.level = LevelDebug
-	bl.loggerFuncCallDepth = 2
+	bl.loggerFuncCallDepth = 3
 	bl.msgChanLen = append(channelLens, 0)[0]
 	if bl.msgChanLen <= 0 {
 		bl.msgChanLen = defaultAsyncMsgLen
@@ -149,7 +153,7 @@ func NewLogger(channelLens ...int64) *BeeLogger {
 	return bl
 }
 
-// Async set the log to asynchronous and start the goroutine
+// Async sets the log to asynchronous and start the goroutine
 func (bl *BeeLogger) Async(msgLen ...int64) *BeeLogger {
 	bl.lock.Lock()
 	defer bl.lock.Unlock()
@@ -160,10 +164,10 @@ func (bl *BeeLogger) Async(msgLen ...int64) *BeeLogger {
 	if len(msgLen) > 0 && msgLen[0] > 0 {
 		bl.msgChanLen = msgLen[0]
 	}
-	bl.msgChan = make(chan *logMsg, bl.msgChanLen)
+	bl.msgChan = make(chan *LogMsg, bl.msgChanLen)
 	logMsgPool = &sync.Pool{
 		New: func() interface{} {
-			return &logMsg{}
+			return &LogMsg{}
 		},
 	}
 	bl.wg.Add(1)
@@ -172,7 +176,7 @@ func (bl *BeeLogger) Async(msgLen ...int64) *BeeLogger {
 }
 
 // SetLogger provides a given logger adapter into BeeLogger with config string.
-// config need to be correct JSON as string: {"interval":360}.
+// config must in in JSON format like {"interval":360}}
 func (bl *BeeLogger) setLogger(adapterName string, configs ...string) error {
 	config := append(configs, "{}")[0]
 	for _, l := range bl.outputs {
@@ -181,13 +185,24 @@ func (bl *BeeLogger) setLogger(adapterName string, configs ...string) error {
 		}
 	}
 
-	log, ok := adapters[adapterName]
+	logAdapter, ok := adapters[adapterName]
 	if !ok {
 		return fmt.Errorf("logs: unknown adaptername %q (forgotten Register?)", adapterName)
 	}
 
-	lg := log()
+	lg := logAdapter()
+
+	// Global formatter overrides the default set formatter
+	if len(bl.globalFormatter) > 0 {
+		fmtr, ok := GetFormatter(bl.globalFormatter)
+		if !ok {
+			return errors.New(fmt.Sprintf("the formatter with name: %s not found", bl.globalFormatter))
+		}
+		lg.SetFormatter(fmtr)
+	}
+
 	err := lg.Init(config)
+
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "logs.BeeLogger.SetLogger: "+err.Error())
 		return err
@@ -197,7 +212,7 @@ func (bl *BeeLogger) setLogger(adapterName string, configs ...string) error {
 }
 
 // SetLogger provides a given logger adapter into BeeLogger with config string.
-// config need to be correct JSON as string: {"interval":360}.
+// config must in in JSON format like {"interval":360}}
 func (bl *BeeLogger) SetLogger(adapterName string, configs ...string) error {
 	bl.lock.Lock()
 	defer bl.lock.Unlock()
@@ -208,7 +223,7 @@ func (bl *BeeLogger) SetLogger(adapterName string, configs ...string) error {
 	return bl.setLogger(adapterName, configs...)
 }
 
-// DelLogger remove a logger adapter in BeeLogger.
+// DelLogger removes a logger adapter in BeeLogger.
 func (bl *BeeLogger) DelLogger(adapterName string) error {
 	bl.lock.Lock()
 	defer bl.lock.Unlock()
@@ -227,9 +242,9 @@ func (bl *BeeLogger) DelLogger(adapterName string) error {
 	return nil
 }
 
-func (bl *BeeLogger) writeToLoggers(when time.Time, msg string, level int) {
+func (bl *BeeLogger) writeToLoggers(lm *LogMsg) {
 	for _, l := range bl.outputs {
-		err := l.WriteMsg(when, msg, level)
+		err := l.WriteMsg(lm)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "unable to WriteMsg to adapter:%v,error:%v\n", l.name, err)
 		}
@@ -244,63 +259,75 @@ func (bl *BeeLogger) Write(p []byte) (n int, err error) {
 	if p[len(p)-1] == '\n' {
 		p = p[0 : len(p)-1]
 	}
+	lm := &LogMsg{
+		Msg:   string(p),
+		Level: levelLoggerImpl,
+	}
+
 	// set levelLoggerImpl to ensure all log message will be write out
-	err = bl.writeMsg(levelLoggerImpl, string(p))
+	err = bl.writeMsg(lm)
 	if err == nil {
 		return len(p), err
 	}
 	return 0, err
 }
 
-func (bl *BeeLogger) writeMsg(logLevel int, msg string, v ...interface{}) error {
+func (bl *BeeLogger) writeMsg(lm *LogMsg) error {
 	if !bl.init {
 		bl.lock.Lock()
 		bl.setLogger(AdapterConsole)
 		bl.lock.Unlock()
 	}
 
-	if len(v) > 0 {
-		msg = fmt.Sprintf(msg, v...)
+	var (
+		file string
+		line int
+		ok   bool
+	)
+
+	_, file, line, ok = runtime.Caller(bl.loggerFuncCallDepth)
+	if !ok {
+		file = "???"
+		line = 0
 	}
+	lm.FilePath = file
+	if len(ignoreDir) > 0 {
+		lm.FilePath = strings.TrimPrefix(lm.FilePath, ignoreDir)
+	}
+	lm.LineNumber = line
 
-	msg = "- " + msg
+	lm.enableFullFilePath = bl.enableFullFilePath
+	lm.enableFuncCallDepth = bl.enableFuncCallDepth
 
-	msg = bl.prefix + msg
-
-	//set level info in front of filename info
-	if logLevel == levelLoggerImpl {
+	// set level info in front of filename info
+	if lm.Level == levelLoggerImpl {
 		// set to emergency to ensure all log will be print out correctly
-		logLevel = LevelEmergency
-	} else {
-		msg = levelPrefix[logLevel] + msg
-	}
-
-	when := time.Now()
-	if bl.enableFuncCallDepth {
-		_, file, line, ok := runtime.Caller(bl.loggerFuncCallDepth)
-		if !ok {
-			file = "???"
-			line = 0
-		}
-		_, filename := path.Split(file)
-		msg = filename + ":" + strconv.Itoa(line) + " " + msg
+		lm.Level = LevelEmergency
 	}
 
 	if bl.asynchronous {
-		lm := logMsgPool.Get().(*logMsg)
-		lm.level = logLevel
-		lm.msg = msg
-		lm.when = when
-		bl.msgChan <- lm
+		logM := logMsgPool.Get().(*LogMsg)
+		logM.Level = lm.Level
+		logM.Msg = lm.Msg
+		logM.When = lm.When
+		logM.Args = lm.Args
+		logM.FilePath = lm.FilePath
+		logM.LineNumber = lm.LineNumber
+		logM.Prefix = lm.Prefix
+		if bl.outputs != nil {
+			bl.msgChan <- lm
+		} else {
+			logMsgPool.Put(lm)
+		}
 	} else {
-		bl.writeToLoggers(when, msg, logLevel)
+		bl.writeToLoggers(lm)
 	}
 	return nil
 }
 
-// SetLevel Set log message level.
+// SetLevel sets log message level.
 // If message level (such as LevelDebug) is higher than logger level (such as LevelWarning),
-// log providers will not even be sent the message.
+// log providers will not be sent the message.
 func (bl *BeeLogger) SetLevel(l int) {
 	bl.level = l
 }
@@ -337,7 +364,7 @@ func (bl *BeeLogger) startLogger() {
 	for {
 		select {
 		case bm := <-bl.msgChan:
-			bl.writeToLoggers(bm.when, bm.msg, bm.level)
+			bl.writeToLoggers(bm)
 			logMsgPool.Put(bm)
 		case sg := <-bl.signalChan:
 			// Now should only send "flush" or "close" to bl.signalChan
@@ -357,14 +384,38 @@ func (bl *BeeLogger) startLogger() {
 	}
 }
 
+func (bl *BeeLogger) setGlobalFormatter(fmtter string) error {
+	bl.globalFormatter = fmtter
+	return nil
+}
+
+// SetGlobalFormatter sets the global formatter for all log adapters
+// don't forget to register the formatter by invoking RegisterFormatter
+func SetGlobalFormatter(fmtter, dir string) error {
+	if len(dir) > 0 {
+		ignoreDir = dir
+	}
+	return beeLogger.setGlobalFormatter(fmtter)
+}
+
 // Emergency Log EMERGENCY level message.
 func (bl *BeeLogger) Emergency(format string, v ...interface{}) {
 	if LevelEmergency > bl.level {
 		return
 	}
-	bl.writeMsg(LevelEmergency, format, v...)
-	time.Sleep(50 * time.Millisecond)
-	os.Exit(1)
+
+	lm := &LogMsg{
+		Level: LevelEmergency,
+		Msg:   format,
+		When:  time.Now(),
+	}
+	if len(v) > 0 {
+		lm.Msg = fmt.Sprintf(lm.Msg, v...)
+	}
+
+	bl.writeMsg(lm)
+	defer os.Exit(0)
+	time.Sleep(100 * time.Millisecond)
 }
 
 // Alert Log ALERT level message.
@@ -372,7 +423,14 @@ func (bl *BeeLogger) Alert(format string, v ...interface{}) {
 	if LevelAlert > bl.level {
 		return
 	}
-	bl.writeMsg(LevelAlert, format, v...)
+
+	lm := &LogMsg{
+		Level: LevelAlert,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+	bl.writeMsg(lm)
 }
 
 // Critical Log CRITICAL level message.
@@ -380,7 +438,14 @@ func (bl *BeeLogger) Critical(format string, v ...interface{}) {
 	if LevelCritical > bl.level {
 		return
 	}
-	bl.writeMsg(LevelCritical, format, v...)
+	lm := &LogMsg{
+		Level: LevelCritical,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Error Log ERROR level message.
@@ -388,7 +453,14 @@ func (bl *BeeLogger) Error(format string, v ...interface{}) {
 	if LevelError > bl.level {
 		return
 	}
-	bl.writeMsg(LevelError, format, v...)
+	lm := &LogMsg{
+		Level: LevelError,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Warning Log WARNING level message.
@@ -396,7 +468,14 @@ func (bl *BeeLogger) Warning(format string, v ...interface{}) {
 	if LevelWarn > bl.level {
 		return
 	}
-	bl.writeMsg(LevelWarn, format, v...)
+	lm := &LogMsg{
+		Level: LevelWarn,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Notice Log NOTICE level message.
@@ -404,7 +483,14 @@ func (bl *BeeLogger) Notice(format string, v ...interface{}) {
 	if LevelNotice > bl.level {
 		return
 	}
-	bl.writeMsg(LevelNotice, format, v...)
+	lm := &LogMsg{
+		Level: LevelNotice,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Informational Log INFORMATIONAL level message.
@@ -412,7 +498,14 @@ func (bl *BeeLogger) Informational(format string, v ...interface{}) {
 	if LevelInfo > bl.level {
 		return
 	}
-	bl.writeMsg(LevelInfo, format, v...)
+	lm := &LogMsg{
+		Level: LevelInfo,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Debug Log DEBUG level message.
@@ -420,7 +513,14 @@ func (bl *BeeLogger) Debug(format string, v ...interface{}) {
 	if LevelDebug > bl.level {
 		return
 	}
-	bl.writeMsg(LevelDebug, format, v...)
+	lm := &LogMsg{
+		Level: LevelDebug,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Warn Log WARN level message.
@@ -429,7 +529,14 @@ func (bl *BeeLogger) Warn(format string, v ...interface{}) {
 	if LevelWarn > bl.level {
 		return
 	}
-	bl.writeMsg(LevelWarn, format, v...)
+	lm := &LogMsg{
+		Level: LevelWarn,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Info Log INFO level message.
@@ -438,7 +545,14 @@ func (bl *BeeLogger) Info(format string, v ...interface{}) {
 	if LevelInfo > bl.level {
 		return
 	}
-	bl.writeMsg(LevelInfo, format, v...)
+	lm := &LogMsg{
+		Level: LevelInfo,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Trace Log TRACE level message.
@@ -447,7 +561,14 @@ func (bl *BeeLogger) Trace(format string, v ...interface{}) {
 	if LevelDebug > bl.level {
 		return
 	}
-	bl.writeMsg(LevelDebug, format, v...)
+	lm := &LogMsg{
+		Level: LevelDebug,
+		Msg:   format,
+		When:  time.Now(),
+		Args:  v,
+	}
+
+	bl.writeMsg(lm)
 }
 
 // Flush flush all chan data.
@@ -491,7 +612,7 @@ func (bl *BeeLogger) flush() {
 		for {
 			if len(bl.msgChan) > 0 {
 				bm := <-bl.msgChan
-				bl.writeToLoggers(bm.when, bm.msg, bm.level)
+				bl.writeToLoggers(bm)
 				logMsgPool.Put(bm)
 				continue
 			}
@@ -541,6 +662,12 @@ func GetLogger(prefixes ...string) *log.Logger {
 	return l
 }
 
+// EnableFullFilePath enables full file path logging. Disabled by default
+// e.g "/home/Documents/GitHub/beego/mainapp/" instead of "mainapp"
+func EnableFullFilePath(b bool) {
+	beeLogger.enableFullFilePath = b
+}
+
 // Reset will remove all the adapter
 func Reset() {
 	beeLogger.Reset()
@@ -569,7 +696,7 @@ func EnableFuncCallDepth(b bool) {
 // SetLogFuncCall set the CallDepth, default is 4
 func SetLogFuncCall(b bool) {
 	beeLogger.EnableFuncCallDepth(b)
-	beeLogger.SetLogFuncCallDepth(4)
+	beeLogger.SetLogFuncCallDepth(3)
 }
 
 // SetLogFuncCallDepth set log funcCallDepth
@@ -646,10 +773,8 @@ func formatLog(f interface{}, v ...interface{}) string {
 		if len(v) == 0 {
 			return msg
 		}
-		if strings.Contains(msg, "%") && !strings.Contains(msg, "%%") {
-			//format string
-		} else {
-			//do not contain format char
+		if !strings.Contains(msg, "%") {
+			// do not contain format char
 			msg += strings.Repeat(" %v", len(v))
 		}
 	default:
