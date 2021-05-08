@@ -44,7 +44,7 @@ import (
 	"time"
 )
 
-var ignoreDir string
+var _ignorePath string
 
 // RFC5424 log message levels.
 const (
@@ -291,9 +291,10 @@ func (bl *BeeLogger) writeMsg(lm *LogMsg) error {
 		line = 0
 	}
 	lm.FilePath = file
-	if len(ignoreDir) > 0 {
-		lm.FilePath = strings.TrimPrefix(lm.FilePath, ignoreDir)
+	if len(_ignorePath) > 0 {
+		lm.FilePath = strings.TrimPrefix(lm.FilePath, _ignorePath)
 	}
+
 	lm.LineNumber = line
 
 	lm.enableFullFilePath = bl.enableFullFilePath
@@ -391,11 +392,12 @@ func (bl *BeeLogger) setGlobalFormatter(fmtter string) error {
 
 // SetGlobalFormatter sets the global formatter for all log adapters
 // don't forget to register the formatter by invoking RegisterFormatter
-func SetGlobalFormatter(fmtter, dir string) error {
-	if len(dir) > 0 {
-		ignoreDir = dir
-	}
+func SetGlobalFormatter(fmtter string) error {
 	return beeLogger.setGlobalFormatter(fmtter)
+}
+
+func SetIgnorePath(ignorePath string) {
+	_ignorePath = ignorePath
 }
 
 // Emergency Log EMERGENCY level message.
