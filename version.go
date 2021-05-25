@@ -1,3 +1,3 @@
 package logs
 
-const VERSION = "v2021.513.1643"
+const VERSION = "v2021.525.1606"

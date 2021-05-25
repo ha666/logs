@@ -38,13 +38,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
 
-var _ignorePath string
+var _ignorePath map[int]*regexp.Regexp
 
 // RFC5424 log message levels.
 const (
@@ -291,8 +292,10 @@ func (bl *BeeLogger) writeMsg(lm *LogMsg) error {
 		line = 0
 	}
 	lm.FilePath = file
-	if len(_ignorePath) > 0 {
-		lm.FilePath = strings.TrimPrefix(lm.FilePath, _ignorePath)
+	if _ignorePath != nil && len(_ignorePath) > 0 {
+		for _, v := range _ignorePath {
+			lm.FilePath = v.ReplaceAllString(lm.FilePath, "")
+		}
 	}
 
 	lm.LineNumber = line
@@ -396,8 +399,13 @@ func SetGlobalFormatter(fmtter string) error {
 	return beeLogger.setGlobalFormatter(fmtter)
 }
 
-func SetIgnorePath(ignorePath string) {
-	_ignorePath = ignorePath
+func SetIgnorePath(ignorePath []string) {
+	if ignorePath != nil && len(ignorePath) > 0 {
+		_ignorePath = make(map[int]*regexp.Regexp)
+		for i, v := range ignorePath {
+			_ignorePath[i] = regexp.MustCompile(v)
+		}
+	}
 }
 
 // Emergency Log EMERGENCY level message.
